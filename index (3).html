@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyber Live Attendance</title>
+    
+    <!-- Google Fonts for Sci-Fi Look -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@500;600&display=swap" rel="stylesheet">
+    
+    <!-- QR Code Scanner Library -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    
+    <style>
+        /* BASE & BACKGROUND (Cyber Grid) */
+        body { 
+            background-color: #050810; 
+            background-image: 
+                linear-gradient(rgba(0, 255, 204, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 204, 0.05) 1px, transparent 1px);
+            background-size: 25px 25px;
+            color: #00ffcc; 
+            font-family: 'Rajdhani', sans-serif; 
+            text-align: center; 
+            margin: 0;
+            padding: 20px 10px;
+            position: relative;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* HUD SIDE PANELS */
+        body::before, body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            width: 25px;
+            pointer-events: none;
+            z-index: -1;
+            background: repeating-linear-gradient(
+                0deg, 
+                transparent, 
+                transparent 15px, 
+                rgba(0,255,204,0.1) 15px, 
+                rgba(0,255,204,0.1) 30px
+            );
+        }
+        body::before { left: 0; border-right: 2px solid rgba(0, 255, 204, 0.3); }
+        body::after { right: 0; border-left: 2px solid rgba(0, 255, 204, 0.3); }
+
+        /* MAIN APP CONTAINER */
+        .cyber-container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: rgba(10, 14, 20, 0.85);
+            border: 1px solid rgba(0, 255, 204, 0.4);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+            position: relative;
+        }
+
+        /* TECH CORNERS */
+        .cyber-container::before, .cyber-container::after {
+            content: ''; position: absolute; width: 20px; height: 20px;
+        }
+        .cyber-container::before { top: -2px; left: -2px; border-top: 2px solid #00ffcc; border-left: 2px solid #00ffcc; }
+        .cyber-container::after { bottom: -2px; right: -2px; border-bottom: 2px solid #00ffcc; border-right: 2px solid #00ffcc; }
+
+        /* BLINKING TITLE EFFECT */
+        h2 { 
+            font-family: 'Orbitron', sans-serif;
+            color: #00ffcc; 
+            text-shadow: 0 0 10px rgba(0, 255, 204, 0.8); 
+            letter-spacing: 2px;
+            margin-top: 0;
+            font-size: 22px;
+            animation: textBlink 2s infinite;
+        }
+        
+        h3 { 
+            font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
+            letter-spacing: 1px;
+            border-bottom: 1px dashed #00ffcc;
+            display: inline-block;
+            padding-bottom: 5px;
+        }
+
+        .system-status {
+            font-size: 12px;
+            color: #ff0055;
+            letter-spacing: 2px;
+            margin-bottom: 15px;
+            text-shadow: 0 0 5px #ff0055;
+            animation: pulse 1s infinite;
+        }
+
+        /* SCANNER CAMERA BOX */
+        #reader { 
+            width: 100%; 
+            max-width: 350px; 
+            margin: 0 auto 10px auto; 
+            border: 2px solid #00ffcc; 
+            border-radius: 5px; 
+            background: #000;
+            position: relative;
+            overflow: hidden;
+            animation: borderGlow 1.5s infinite alternate;
+        }
+        #reader video {
+            width: 100% !important;
+            height: auto !important;
+        }
+        #reader a { color: #00ffcc; }
+        #reader span { color: #fff; font-family: 'Rajdhani', sans-serif; }
+
+        .status-msg {
+            font-size: 14px;
+            color: #00ffcc;
+            margin-bottom: 8px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        /* CYBER INDICATOR LED STYLES */
+        .indicator-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .led-light {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            box-shadow: 0 0 10px currentColor;
+        }
+        .led-label {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 11px;
+            letter-spacing: 1px;
+        }
+
+        .red-blink {
+            background-color: #ff0055;
+            color: #ff0055;
+            animation: ledBlink 1s infinite alternate;
+        }
+        .green-solid {
+            background-color: #00ffcc;
+            color: #00ffcc;
+            box-shadow: 0 0 15px #00ffcc;
+        }
+
+        /* BUTTONS */
+        .btn-group { margin: 15px 0; }
+        button { 
+            background: transparent; 
+            color: #00ffcc; 
+            border: 1px solid #00ffcc; 
+            padding: 10px 20px; 
+            cursor: pointer; 
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+            letter-spacing: 1px;
+            margin: 5px;
+            text-transform: uppercase;
+            transition: 0.3s all;
+            box-shadow: inset 0 0 5px rgba(0,255,204,0.2);
+        }
+        button:hover {
+            background: #00ffcc;
+            color: #050810;
+            box-shadow: 0 0 15px #00ffcc;
+        }
+        button.delete-btn {
+            border-color: #ff0055;
+            color: #ff0055;
+            box-shadow: inset 0 0 5px rgba(255,0,85,0.2);
+        }
+        button.delete-btn:hover {
+            background: #ff0055;
+            color: #fff;
+            box-shadow: 0 0 15px #ff0055;
+        }
+
+        /* ATTENDANCE TABLE */
+        table { 
+            width: 100%; 
+            margin: 10px auto; 
+            border-collapse: collapse; 
+            background: rgba(0, 255, 204, 0.02); 
+            font-size: 16px;
+        }
+        th, td { 
+            border: 1px solid rgba(0, 255, 204, 0.2); 
+            padding: 10px; 
+            color: #e0fbfc; 
+        }
+        th { 
+            background: rgba(0, 255, 204, 0.1); 
+            color: #00ffcc; 
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+        }
+
+        /* ANIMATIONS */
+        @keyframes pulse {
+            0% { opacity: 0.4; }
+            50% { opacity: 1; }
+            100% { opacity: 0.4; }
+        }
+
+        @keyframes borderGlow {
+            0% { box-shadow: 0 0 5px rgba(0, 255, 204, 0.2), inset 0 0 5px rgba(0, 255, 204, 0.2); border-color: #00ffcc; }
+            100% { box-shadow: 0 0 20px rgba(0, 255, 204, 0.8), inset 0 0 10px rgba(0, 255, 204, 0.5); border-color: #ff0055; }
+        }
+
+        @keyframes textBlink {
+            0%, 100% { opacity: 1; text-shadow: 0 0 10px rgba(0, 255, 204, 0.8); }
+            50% { opacity: 0.6; text-shadow: 0 0 2px rgba(0, 255, 204, 0.2); }
+        }
+
+        @keyframes ledBlink {
+            0% { opacity: 0.3; box-shadow: 0 0 2px #ff0055; }
+            100% { opacity: 1; box-shadow: 0 0 12px #ff0055; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="cyber-container">
+        <div class="system-status">[ SYSTEM ONLINE - LIVE SYNC ]</div>
+        <h2>CYBER ATTENDANCE</h2>
+        
+        <!-- Camera Viewport -->
+        <div id="reader"></div>
+        <div id="status" class="status-msg">STANDBY FOR SCAN...</div>
+        
+        <!-- CYBER INDICATOR LED -->
+        <div class="indicator-container">
+            <div id="cyberLed" class="led-light red-blink"></div>
+            <span id="ledText" class="led-label" style="color: #ff0055;">WAITING FOR QR...</span>
+        </div>
+        
+        <!-- Control Buttons -->
+        <div class="btn-group">
+            <button id="scanAgainBtn" style="display:none;">Scan Next</button>
+            <button id="deleteBtn" class="delete-btn">Clear Display</button>
+        </div>
+
+        <!-- Attendance Table -->
+        <h3>[ TODAY'S LOGS ]</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>NO.</th>
+                    <th>ID / NAME</th>
+                    <th>DATE</th>
+                    <th>TIME</th>
+                </tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+        </table>
+    </div>
+
+    <!-- LOGIC SCRIPT LINK -->
+    <script src="script.js"></script>
+</body>
+</html>
