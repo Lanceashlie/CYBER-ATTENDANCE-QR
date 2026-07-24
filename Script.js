@@ -1,113 +1,376 @@
-// ==========================================
-// 1. GOOGLE SHEETS URL (PALITAN ITO NG LINK MO)
-// ==========================================
-var GOOGLE_SCRIPT_URL = "DITO_IPASTE_ANG_GOOGLE_SCRIPT_URL";
+// @ts-nocheck
+// (Html5Qrcode comes from an external <script> in index.html, not an import,
+// so the editor's type checker can't see its shape — this line just silences
+// those "unknown type" yellow hints. No effect on how the code runs.)
 
 // ==========================================
-// 2. LOAD LOCAL HISTORY
+// 0. ON-PAGE ERROR DISPLAY
 // ==========================================
-var scanHistory = JSON.parse(localStorage.getItem("myScans")) || [];
+function showFatalError(message) {
+    console.error(message);
+    let banner = document.getElementById("fatalErrorBanner");
+    if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "fatalErrorBanner";
+        banner.style.cssText =
+            "position:fixed;top:0;left:0;right:0;z-index:99999;" +
+            "background:#b00020;color:#fff;padding:12px 16px;" +
+            "font-family:sans-serif;font-size:14px;line-height:1.4;white-space:pre-wrap;";
+        document.body.prepend(banner);
+    }
+    banner.textContent = "⚠ " + message;
+}
 
 // ==========================================
-// 3. AUTO-RESET LOGIC (Tuwing bagong araw)
+// 1. CONFIGURATION & ENDPOINTS
 // ==========================================
-function checkAutoReset() {
-    var today = new Date().toLocaleDateString();
-    var lastSavedDate = localStorage.getItem("lastSavedDate");
+const CONFIG = {
+    excelWebhookUrl: "https://hook.us2.make.com/ax3qha2fmwg8b8h2ia4m92ru35cyr6jy",
+    googleSheetsUrl: "", // FILL THIS IN with your Google Sheets Web App URL
+    scanCooldownMs: 3000,
+    storageKey: "attendance_scan_history",
+    dateKey: "attendance_last_saved_date"
+};
 
-    if (lastSavedDate && lastSavedDate !== today) {
-        localStorage.removeItem("myScans");
+// ==========================================
+// 2. STATE MANAGEMENT & STORAGE
+// ==========================================
+let scanHistory = [];
+try {
+    scanHistory = JSON.parse(localStorage.getItem(CONFIG.storageKey)) || [];
+} catch (e) {
+    console.warn("Saved scan history was unreadable, starting fresh.", e);
+    scanHistory = [];
+}
+
+function getIsoDate() {
+    const now = new Date();
+    const tzOffsetMs = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - tzOffsetMs).toISOString().slice(0, 10);
+}
+
+function initializeDailyReset() {
+    const currentDate = getIsoDate();
+    const lastSavedDate = localStorage.getItem(CONFIG.dateKey);
+
+    if (lastSavedDate && lastSavedDate !== currentDate) {
+        localStorage.removeItem(CONFIG.storageKey);
         scanHistory = [];
     }
-    localStorage.setItem("lastSavedDate", today);
+    localStorage.setItem(CONFIG.dateKey, currentDate);
 }
-checkAutoReset();
+initializeDailyReset();
 
 // ==========================================
-// 4. LED STATUS CONTROLLER (Red = Standby, Green = Success)
+// 3. UI CONTROLLER (LED & TABLE)
 // ==========================================
 function setLedStatus(state) {
-    var led = document.getElementById("cyberLed");
-    var ledText = document.getElementById("ledText");
-    
+    const led = document.getElementById("cyberLed");
+    const ledText = document.getElementById("ledText");
+
     if (!led || !ledText) return;
 
     if (state === "ready") {
         led.className = "led-light red-blink";
-        ledText.innerHTML = "WAITING FOR QR...";
+        ledText.textContent = "WAITING FOR QR...";
         ledText.style.color = "#ff0055";
     } else if (state === "success") {
         led.className = "led-light green-solid";
-        ledText.innerHTML = "ACCESS GRANTED - SYNCED";
+        ledText.textContent = "ACCESS GRANTED - SYNCED";
         ledText.style.color = "#00ffcc";
     }
 }
 
-// ==========================================
-// 5. UPDATE TABLE UI
-// ==========================================
-function updateUI() {
-    var tbody = document.getElementById("historyBody");
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    for (var i = 0; i < scanHistory.length; i++) {
-        var item = scanHistory[i];
-        tbody.innerHTML += `
-            <tr>
-                <td>0${i + 1}</td>
-                <td>${item.name}</td>
-                <td>${item.date}</td>
-                <td>${item.time}</td>
-            </tr>
-        `;
-    }
+function escapeHtml(str) {
+    return String(str).replace(/[&<>'"]/g,
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+    );
 }
 
-// ==========================================
-// 6. SEND DATA TO GOOGLE SHEETS
-// ==========================================
-function sendToGoogleSheets(name, date, time) {
-    var statusDiv = document.getElementById("status");
-    
-    if (GOOGLE_SCRIPT_URL === "DITO_IPASTE_ANG_GOOGLE_SCRIPT_URL") {
-        if (statusDiv) statusDiv.innerHTML = "<span style='color:#ff0055'>⚠️ Google URL Missing!</span>";
+function updateUI() {
+    const tbody = document.getElementById("historyBody");
+    if (!tbody) return;
+
+    if (scanHistory.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: #888;">No attendance records yet today.</td></tr>`;
         return;
     }
 
-    if (statusDiv) statusDiv.innerHTML = "⚡ UPLOADING DATA TO CLOUD...";
-
-    var fullUrl = `${GOOGLE_SCRIPT_URL}?name=${encodeURIComponent(name)}&date=${encodeURIComponent(date)}&time=${encodeURIComponent(time)}`;
-
-    fetch(fullUrl)
-        .then(response => {
-            if (statusDiv) statusDiv.innerHTML = "✅ SYNC SUCCESSFUL";
-        })
-        .catch(error => {
-            if (statusDiv) statusDiv.innerHTML = "⚠️ SAVED LOCALLY (OFFLINE)";
-        });
+    tbody.innerHTML = scanHistory.map((item, index) => `
+        <tr>
+            <td>${String(index + 1).padStart(2, '0')}</td>
+            <td>${escapeHtml(item.name)}</td>
+            <td>${escapeHtml(item.date)}</td>
+            <td>${escapeHtml(item.time)}</td>
+        </tr>
+    `).join('');
 }
 
 // ==========================================
-// 7. ON SCAN SUCCESS
+// 4. NETWORK SERVICES (Data Sync)
 // ==========================================
-function onScanSuccess(decodedText) {
-    checkAutoReset();
+function sendPayload(endpointUrl, payloadData) {
+    if (!endpointUrl || endpointUrl.trim() === "") return;
 
-    var scannedValue = String(decodedText).trim();
-    var today = new Date().toLocaleDateString();
-    var currentTime = new Date().toLocaleTimeString();
+    const queryParams = new URLSearchParams(payloadData).toString();
+    const fullUrl = `${endpointUrl}?${queryParams}`;
 
-    var alreadyScanned = scanHistory.some(item => String(item.name).trim() === scannedValue && item.date === today);
+    fetch(fullUrl, { method: 'GET', mode: 'no-cors' })
+        .catch(() => console.warn("Sync warning: Operating in offline mode."));
+}
 
-    if (alreadyScanned) {
-        alert("⚠️ Na-scan na ito ngayong araw!");
+function syncAttendanceData(name, date, time) {
+    const payload = { name, date, time };
+    sendPayload(CONFIG.excelWebhookUrl, payload);
+    sendPayload(CONFIG.googleSheetsUrl, payload);
+}
+
+// ==========================================
+// 5. END-OF-DAY EXPORT FUNCTION
+// ==========================================
+function exportTodayAttendance() {
+    if (scanHistory.length === 0) {
+        alert("No attendance records to export today.");
+        return;
+    }
+
+    const exportBtn = document.getElementById("exportBtn");
+    if (exportBtn) {
+        exportBtn.disabled = true;
+        exportBtn.textContent = "EXPORTING...";
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    scanHistory.forEach((record) => {
+        const payload = {
+            name: record.name,
+            date: record.date,
+            time: record.time
+        };
+
+        if (CONFIG.googleSheetsUrl && CONFIG.googleSheetsUrl.trim() !== "") {
+            const queryParams = new URLSearchParams(payload).toString();
+            const fullUrl = `${CONFIG.googleSheetsUrl}?${queryParams}`;
+
+            fetch(fullUrl, { method: 'GET', mode: 'no-cors' })
+                .then(() => {
+                    successCount++;
+                })
+                .catch(err => {
+                    failCount++;
+                    console.error("Export error:", err);
+                });
+        }
+    });
+
+    if (CONFIG.excelWebhookUrl) {
+        scanHistory.forEach(record => {
+            sendPayload(CONFIG.excelWebhookUrl, {
+                name: record.name,
+                date: record.date,
+                time: record.time
+            });
+        });
+    }
+
+    setTimeout(() => {
+        if (exportBtn) {
+            exportBtn.disabled = false;
+            exportBtn.textContent = "EXPORT TODAY'S ATTENDANCE";
+        }
+        alert(`✓ Export complete! ${scanHistory.length} records sent to sheets.`);
+    }, 2000);
+}
+
+// ==========================================
+// 6. QR SCANNER
+// ==========================================
+let html5QrCode = null;
+let isCooldown = false;
+
+function handleScanSuccess(decodedText) {
+    if (isCooldown) return;
+    isCooldown = true;
+
+    initializeDailyReset();
+
+    const sanitizedText = String(decodedText).trim();
+    const [studentName] = sanitizedText.split("|");
+    const finalName = studentName ? studentName.trim() : sanitizedText;
+
+    if (!finalName) {
+        isCooldown = false;
+        setLedStatus("ready");
+        return;
+    }
+
+    const today = getIsoDate();
+    const currentTime = new Date().toLocaleTimeString();
+
+    const isAlreadyScanned = scanHistory.some(item => item.name === finalName && item.date === today);
+
+    if (isAlreadyScanned) {
+        alert(`ALREADY SCANNED: ${finalName}`);
     } else {
-        var record = { name: scannedValue, date: today, time: currentTime };
-        scanHistory.push(record);
-        localStorage.setItem("myScans", JSON.stringify(scanHistory));
+        const attendanceRecord = { name: finalName, date: today, time: currentTime };
+        scanHistory.push(attendanceRecord);
+        localStorage.setItem(CONFIG.storageKey, JSON.stringify(scanHistory));
         updateUI();
-        sendToGoogleSheets(scannedValue, today, currentTime);
+
+        // REMOVED: No longer sync on each individual scan.
+    // Instead, will sync ALL records at end of day via the EXPORT button.
+    // syncAttendanceData(finalName, today, currentTime);
+    }
+
+    setLedStatus("success");
+    
+    try {
+        if (html5QrCode) {
+            html5QrCode.pause(true);
+        }
+    } catch (e) {
+        console.error(e);
+    }
+
+    const scanAgainBtn = document.getElementById("scanAgainBtn");
+    if (scanAgainBtn) scanAgainBtn.style.display = "inline-block";
+
+    setTimeout(() => {
+        // FIX: html5-qrcode's resume() is synchronous — it returns void, not a
+        // Promise — and it THROWS if called when the scanner isn't paused.
+        // The old code did `resume().catch(...)`, which crashed with
+        // "Cannot read properties of undefined (reading 'catch')" every time.
+        // That crash skipped the 3 lines below, so isCooldown never went back
+        // to false — the scanner would stop responding after the first scan.
+        try {
+            if (html5QrCode) {
+                html5QrCode.resume();
+            }
+        } catch (e) {
+            console.warn("Resume skipped:", e);
+        }
+        if (scanAgainBtn) scanAgainBtn.style.display = "none";
+        setLedStatus("ready");
+        isCooldown = false;
+    }, CONFIG.scanCooldownMs);
+}
+
+// ==========================================
+// 5.5. EXPORT FUNCTION (End-of-Day Sync)
+// ==========================================
+function exportAttendanceData() {
+    if (scanHistory.length === 0) {
+        alert("No attendance records to export today.");
+        return;
+    }
+
+    const exportBtn = document.getElementById("exportBtn");
+    if (exportBtn) exportBtn.disabled = true;
+
+    // Send all records at once to the webhook
+    const payload = {
+        records: JSON.stringify(scanHistory),
+        date: getIsoDate(),
+        count: scanHistory.length,
+        timestamp: new Date().toLocaleTimeString()
+    };
+
+    sendPayload(CONFIG.excelWebhookUrl, payload);
+
+    setTimeout(() => {
+        alert(`✓ Exported ${scanHistory.length} attendance record(s) for ${getIsoDate()}`);
+        if (exportBtn) exportBtn.disabled = false;
+    }, 500);
+}
+
+// ==========================================
+// 6. EVENT HANDLERS & BOOTSTRAP
+// ==========================================
+function startScanner() {
+    if (typeof Html5Qrcode === "undefined") {
+        showFatalError(
+            "The QR scanning library didn't load. Check that index.html includes " +
+            "the html5-qrcode <script> tag and that the device has internet."
+        );
+        return;
+    }
+
+    if (!document.getElementById("reader")) {
+        showFatalError('No element with id="reader" exists in the HTML.');
+        return;
+    }
+
+    html5QrCode = new Html5Qrcode("reader");
+
+    html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        handleScanSuccess
+    ).catch(err => {
+        const msg = String(err && err.message ? err.message : err);
+        if (location.protocol === "file:") {
+            showFatalError("Camera blocked: Open over https:// or localhost instead of file://.");
+        } else if (/NotAllowedError|Permission/i.test(msg)) {
+            showFatalError("Camera permission was denied.");
+        } else if (/NotFoundError/i.test(msg)) {
+            showFatalError("No camera found.");
+        } else {
+            showFatalError("Scanner failed: " + msg);
+        }
+        console.error("Scanner initialization failed:", err);
+    });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    updateUI();
+    startScanner();
+    setLedStatus("ready");
+
+    const scanAgainBtn = document.getElementById("scanAgainBtn");
+    if (scanAgainBtn) {
+        scanAgainBtn.addEventListener("click", () => {
+            // Same fix as above: resume() throws instead of rejecting.
+            try {
+                if (html5QrCode) {
+                    html5QrCode.resume();
+                }
+            } catch (e) {
+                console.warn("Resume skipped:", e);
+            }
+            scanAgainBtn.style.display = "none";
+            setLedStatus("ready");
+            isCooldown = false;
+        });
+    }
+
+    const deleteBtn = document.getElementById("deleteBtn");
+    if (deleteBtn) {
+        deleteBtn.addEventListener("click", () => {
+            if (confirm("Clear today's attendance records?")) {
+                scanHistory = [];
+                localStorage.removeItem(CONFIG.storageKey);
+                updateUI();
+            }
+        });
+    }
+
+    const exportBtn = document.getElementById("exportBtn");
+    if (exportBtn) {
+        exportBtn.addEventListener("click", () => {
+            if (confirm(`Export ${scanHistory.length} attendance record(s)?`)) {
+                exportAttendanceData();
+            }
+        });
+    }
+});
+
+window.addEventListener("beforeunload", () => {
+    if (html5QrCode && typeof html5QrCode.isScanning === "boolean" && html5QrCode.isScanning) {
+        html5QrCode.stop().catch(() => {});
+    }
+});
     }
 
     // 🟢 Magiging Green ang LED kapag may tagumpay na scan!
